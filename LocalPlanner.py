@@ -41,7 +41,8 @@ def parse_local_plan(input_string):
 
     return task_list, exc_value, obsv
 
-def localplan_pwa(idx, tasks, current_task, comp_dict):    ### 실제로 전체 task가 아니라 tasks[idx-2:idx-3] 범위를 넣을 것. / command 도 입력으로 쓸 의향 있음  
+def localplan_pwa(idx, tasks, current_task, comp_dict, comp_type='pwa', task_context=None, task_substeps=None):    ### 실제로 전체 task가 아니라 tasks[idx-2:idx-3] 범위를 넣을 것. / command 도 입력으로 쓸 의향 있음  
+# def localPlan(idx, task_list, task, comp_dict, comp_type='pwa', task_context=None, task_substeps=None):
     # task_list = [task[1] + ',' + task[2] for task in tasks] # localplan에서는 assist_bit 필요 없으므로 assist_bit제외한 task_list만 만들기 
     # [[0, 'open, Google Chrome']]
     task_lists = [task[1] + ', ' + task[2] for task in tasks if isinstance(task, list) and len(task) > 2]
@@ -80,7 +81,7 @@ def localplan_pwa(idx, tasks, current_task, comp_dict):    ### 실제로 전체 
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt },
-                {"role": "user", "content": f"Task list (context): {task_list}, Current task: {current_task}, Component dictionary: {comp_dict}."},
+                {"role": "user", "content": f"{task_context}: {task_substeps}, Current task: {current_task}, Component dictionary: {comp_dict}."},
                 {"role": "user", "content": "Provide the selected task list with the chosen component. Also, state if Current task is executable (yes/no) with a reason in under 40 words. Answer 'no' only when there is no alternative to execute the task from current screen."},
                 {"role": "user", "content": "Always format your response as follows -> localPlan:<task list>,exc:<yes/no>,observation:<description of the current environment and reasoning>"}
             ],
@@ -115,7 +116,7 @@ def localplan_pwa(idx, tasks, current_task, comp_dict):    ### 실제로 전체 
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt },
-                {"role": "user", "content": f"Task list (context): {task_list}, Current task: {current_task}, Component dictionary: {comp_dict}."},
+                {"role": "user", "content": f"{task_context}: {task_substeps}, Current task: {current_task}, Component dictionary: {comp_dict}."},
                 {"role": "user", "content": "Provide the selected task list with the chosen component. Also, state if Current task is executable (yes/no) with a reason in under 40 words. Answer 'no' only when there is no alternative to execute the task from current screen."},
                 {"role": "user", "content": "Always format your response as follows -> localPlan:<task list>,exc:<yes/no>,observation:<description of the current environment and reasoning>"}
             ],
@@ -150,12 +151,12 @@ def localplan_pwa(idx, tasks, current_task, comp_dict):    ### 실제로 전체 
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt },
-                {"role": "user", "content": f"Task list (context): {task_list}, Current task: {current_task}, Component dictionary: {comp_dict}."},
+                {"role": "user", "content": f"{task_context}: {task_substeps}, Current task: {current_task}, Component dictionary: {comp_dict}."},
                 {"role": "user", "content": "Provide the selected task list with the chosen component. Also, state if Current task is executable (yes/no) with a reason in under 40 words. Answer 'no' only when there is no alternative to execute the task from current screen."},
                 {"role": "user", "content": "Always format your response as follows -> localPlan:<task list>,exc:<yes/no>,observation:<description of the current environment and reasoning>"}
             ],
             max_tokens=400,
-            temperature=0.05
+            temperature=0.3
         )
         
         response = response.choices[0].message.content
@@ -185,7 +186,7 @@ def localplan_pwa(idx, tasks, current_task, comp_dict):    ### 실제로 전체 
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt },
-                {"role": "user", "content": f"Task list (context): {task_list}, Current task: {current_task}, Component dictionary: {comp_dict}."},
+                {"role": "user", "content": f"{task_context}: {task_substeps}, Current task: {current_task}, Component dictionary: {comp_dict}."},
                 {"role": "user", "content": "Provide the selected task list with the chosen component. Also, state if Current task is executable (yes/no) with a reason in under 40 words. Answer 'no' only when there is no alternative to execute the task from current screen."},
                 {"role": "user", "content": "Always format your response as follows -> localPlan:<task list>,exc:<yes/no>,observation:<description of the current environment and reasoning>"}
             ],
@@ -219,7 +220,7 @@ def localplan_pwa(idx, tasks, current_task, comp_dict):    ### 실제로 전체 
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt },
-                {"role": "user", "content": f"Task list (context): {task_list}, Current task: {current_task}, Component dictionary: {comp_dict}."},
+                {"role": "user", "content": f"{task_context}: {task_substeps}, Current task: {current_task}, Component dictionary: {comp_dict}."},
                 {"role": "user", "content": "Provide the selected task list with the chosen component. Also, state if Current task is executable (yes/no) with a reason in under 40 words. Answer 'no' only when there is no alternative to execute the task from current screen."},
                 {"role": "user", "content": "Always format your response as follows -> localPlan:<task list>,exc:<yes/no>,observation:<description of the current environment and reasoning>"}
             ],
@@ -254,7 +255,7 @@ def localplan_pwa(idx, tasks, current_task, comp_dict):    ### 실제로 전체 
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt },
-                {"role": "user", "content": f"Task list (context): {task_list}, Current task: {current_task}, Component dictionary: {comp_dict}."},
+                {"role": "user", "content": f"{task_context}: {task_substeps}, Current task: {current_task}, Component dictionary: {comp_dict}."},
                 {"role": "user", "content": "Provide the selected task list with the chosen component. Also, state if Current task is executable (yes/no) with a reason in under 40 words. Answer 'no' only when there is no alternative to execute the task from current screen."},
                 {"role": "user", "content": "Always format your response as follows -> localPlan:<task list>,exc:<yes/no>,observation:<description of the current environment and reasoning>"}
             ],
@@ -288,7 +289,7 @@ def localplan_pwa(idx, tasks, current_task, comp_dict):    ### 실제로 전체 
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt },
-                {"role": "user", "content": f"Task list (context): {task_list}, Current task: {current_task}, Component dictionary: {comp_dict}."},
+                {"role": "user", "content": f"{task_context}: {task_substeps}, Current task: {current_task}, Component dictionary: {comp_dict}."},
                 {"role": "user", "content": "Provide the selected task list with the chosen component. Also, state if Current task is executable (yes/no) with a reason in under 40 words. Answer 'no' only when there is no alternative to execute the task from current screen."},
                 {"role": "user", "content": "Always format your response as follows -> localPlan:<task list>,exc:<yes/no>,observation:<description of the current environment and reasoning>"}
             ],
@@ -321,7 +322,7 @@ def localplan_pwa(idx, tasks, current_task, comp_dict):    ### 실제로 전체 
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt },
-                {"role": "user", "content": f"Task list (context): {task_list}, Current task: {current_task}, Component dictionary: {comp_dict}."},
+                {"role": "user", "content": f"{task_context}: {task_substeps}, Current task: {current_task}, Component dictionary: {comp_dict}."},
                 {"role": "user", "content": "Provide the selected task list with the chosen component. Also, state if Current task is executable (yes/no) with a reason in under 40 words. Answer 'no' only when there is no alternative to execute the task from current screen."},
                 {"role": "user", "content": "Always format your response as follows -> localPlan:<task list>,exc:<yes/no>,observation:<description of the current environment and reasoning>"}
             ],
@@ -354,7 +355,7 @@ def localplan_pwa(idx, tasks, current_task, comp_dict):    ### 실제로 전체 
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt },
-                {"role": "user", "content": f"Task list (context): {task_list}, Current task: {current_task}, Component dictionary: {comp_dict}."},
+                {"role": "user", "content": f"{task_context}: {task_substeps}, Current task: {current_task}, Component dictionary: {comp_dict}."},
                 {"role": "user", "content": "Provide the selected task list with the chosen component. Also, state if Current task is executable (yes/no) with a reason in under 40 words. Answer 'no' only when there is no alternative to execute the task from current screen."},
                 {"role": "user", "content": "Always format your response as follows -> localPlan:<task list>,exc:<yes/no>,observation:<description of the current environment and reasoning>"}
             ],
@@ -388,7 +389,7 @@ def localplan_pwa(idx, tasks, current_task, comp_dict):    ### 실제로 전체 
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt },
-                {"role": "user", "content": f"Task list (context): {task_list}, Current task: {current_task}, Component dictionary: {comp_dict}."},
+                {"role": "user", "content": f"{task_context}: {task_substeps}, Current task: {current_task}, Component dictionary: {comp_dict}."},
                 {"role": "user", "content": "Provide the selected task list with the chosen component. Also, state if Current task is executable (yes/no) with a reason in under 40 words. Answer 'no' only when there is no alternative to execute the task from current screen."},
                 {"role": "user", "content": "Always format your response as follows -> localPlan:<task list>,exc:<yes/no>,observation:<description of the current environment and reasoning>"}
             ],
@@ -421,7 +422,7 @@ def localplan_pwa(idx, tasks, current_task, comp_dict):    ### 실제로 전체 
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt },
-                {"role": "user", "content": f"Task list (context): {task_list}, Current task: {current_task}, Component dictionary: {comp_dict}."},
+                {"role": "user", "content": f"{task_context}: {task_substeps}, Current task: {current_task}, Component dictionary: {comp_dict}."},
                 {"role": "user", "content": "Provide the selected task list with the chosen component. Also, state if Current task is executable (yes/no) with a reason in under 40 words. Answer 'no' only when there is no alternative to execute the task from current screen."},
                 {"role": "user", "content": "Always format your response as follows -> localPlan:<task list>,exc:<yes/no>,observation:<description of the current environment and reasoning>"}
             ],
@@ -455,7 +456,7 @@ def localplan_pwa(idx, tasks, current_task, comp_dict):    ### 실제로 전체 
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt },
-                {"role": "user", "content": f"Task list (context): {task_list}, Current task: {current_task}, Component dictionary: {comp_dict}."},
+                {"role": "user", "content": f"{task_context}: {task_substeps}, Current task: {current_task}, Component dictionary: {comp_dict}."},
                 {"role": "user", "content": "Provide the selected task list with the chosen component. Also, state if Current task is executable (yes/no) with a reason in under 40 words. Answer 'no' only when there is no alternative to execute the task from current screen."},
                 {"role": "user", "content": "Always format your response as follows -> localPlan:<task list>,exc:<yes/no>,observation:<only the object delete all preposition>"}
             ],
@@ -526,7 +527,7 @@ def localplan_pwa(idx, tasks, current_task, comp_dict):    ### 실제로 전체 
                 {"role": "system", "content": "Always prefer shortcut keys over mouse actions when available (e.g., use 'F2' instead of clicking 'Rename', 'Ctrl+Shift+N' for a new folder)."},
                 {"role": "system", "content": "If no valid mapping exists, return an empty list and indicate that the task cannot be executed."},
                 {"role": "system", "content": "Example:\nEvent: 'send', 'message HI! to smwu_software'\nlocalPlan: [click, Send Message button], [type, HI!], [press, enter]"},
-                {"role": "user", "content": f"Task list (context): {task_list}, Current task: {current_task}, Component dictionary: {comp_dict}."},
+                {"role": "user", "content": f"{task_context}: {task_substeps}, Current task: {current_task}, Component dictionary: {comp_dict}."},
                 {"role": "user", "content": "Provide the selected task list with the chosen component. Also, state if the action is executable (yes/no) with a reason in under 40 words."},
                 {"role": "user", "content": "Always format your response as follows -> localPlan:<task list>,exc:<yes/no>,observation:<description of the current environment and reasoning>"}
             ],

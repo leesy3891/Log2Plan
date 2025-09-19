@@ -396,27 +396,248 @@ def process_command(command):
         print(f"❌ OpenAI API 호출 오류: {e}")
         return None
 
+# =====================[ PATCH: PlanBundle 지원 (구 버전용) ]=====================
+# 본 패치는 'process_command(...)'가 만들어내는 breakdown 텍스트와,
+# 기존 globalPlanner(...)가 생성하는 numbered steps를 재활용하여
+# "MAIN PLAN + Task 섹션" 포맷을 만들고 → PlanBundle(dict)로 파싱합니다.
 
-def globalPlanner(command, content):
-    MAGENTA = "\033[95m"
-    CYAN = "\033[96m"
-    RESET = "\033[0m" 
-    # 벡터 데이터베이스 로드 또는 생성
+import re
+from typing import Dict, Any, List, Tuple
+
+# 1) 포맷 → PlanBundle 파서 (MAIN PLAN + Task 섹션 문자열 → dict)
+_STEP_LINE = re.compile(r'^\s*(\d+)\.\s*([01])#\s*([^,]+)\s*,\s*(.+?)\s*$')
+_TASK_HEADER = re.compile(r'^(Task#\d+):\s*ENV\[(.*?)\]\s*ACT\[(.*?)\]\s*$', re.IGNORECASE)
+
+def _parse_main_steps_block(lines: List[str], start_idx: int) -> Tuple[List[Dict[str, Any]], int]:
+    steps = []
+    i = start_idx
+    while i < len(lines):
+        ln = lines[i].rstrip()
+        # 두 번째 MAIN PLAN 만나면 종료
+        if ln.strip() == "MAIN PLAN" and i > start_idx:
+            break
+        m = _STEP_LINE.match(ln)
+        if m:
+            nid = int(m.group(1)); assist = int(m.group(2))
+            event = m.group(3).strip(); obj = m.group(4).strip()
+            steps.append({"id": nid, "assist": assist, "event": event, "object": obj})
+        i += 1
+    return steps, i
+
+def _parse_task_block(lines: List[str], start_idx: int) -> Tuple[Dict[str, Any], int]:
+    m = _TASK_HEADER.match(lines[start_idx].strip())
+    if not m:
+        return {}, start_idx + 1
+
+    task_id = m.group(1).strip()
+    env_raw = [s.strip() for s in (m.group(2) or "").split(",") if s.strip()]
+    act_raw = [s.strip() for s in (m.group(3) or "").split(",") if s.strip()]
+
+    desc = ""
+    step_ids: List[int] = []
+    i = start_idx + 1
+
+    def _collect_ids_from_text(text: str):
+        # "1, 2, 5-7" 같은 범위 표기도 수용
+        for tok in re.findall(r'\d+(?:\s*-\s*\d+)?', text):
+            if '-' in tok:
+                a, b = [int(x) for x in re.split(r'\s*-\s*', tok)]
+                for k in range(min(a, b), max(a, b) + 1):
+                    step_ids.append(k)
+            else:
+                step_ids.append(int(tok))
+
+    while i < len(lines):
+        ln = lines[i].rstrip()
+        if not ln.strip():
+            i += 1; continue
+        if _TASK_HEADER.match(ln):  # 다음 Task 시작
+            break
+        if ln.strip().lower().startswith("description:"):
+            desc = ln.split(":", 1)[1].strip()
+        m2 = _STEP_LINE.match(ln)
+        if m2:
+            step_ids.append(int(m2.group(1)))
+        else:
+            _collect_ids_from_text(ln)
+        i += 1
+
+    step_ids = sorted(set(step_ids))
+    return {
+        "task_id": task_id,
+        "env": env_raw, "act": act_raw,
+        "description": desc, "step_ids": step_ids
+    }, i
+
+def _parse_formatted_to_planbundle(formatted: str) -> Dict[str, Any]:
+    lines = [ln.rstrip("\n") for ln in (formatted or "").splitlines()]
+
+    # 첫 MAIN PLAN 찾기
+    main_positions = [i for i, ln in enumerate(lines) if ln.strip() == "MAIN PLAN"]
+    if not main_positions:
+        # MAIN PLAN이 없으면 스텝만 파싱
+        steps = []
+        for ln in lines:
+            m = _STEP_LINE.match(ln.strip())
+            if m:
+                steps.append({
+                    "id": int(m.group(1)),
+                    "assist": int(m.group(2)),
+                    "event": m.group(3).strip(),
+                    "object": m.group(4).strip(),
+                    "task_id": None
+                })
+        return {"steps": steps, "tasks": {}, "task_order": []}
+
+    first_main = main_positions[0]
+    steps, second_main_idx = _parse_main_steps_block(lines, first_main + 1)
+
+    tasks: Dict[str, Any] = {}
+    task_order: List[str] = []
+    i = second_main_idx + 1 if second_main_idx < len(lines) else len(lines)
+    while i < len(lines):
+        ln = lines[i].strip()
+        if not ln:
+            i += 1; continue
+        if _TASK_HEADER.match(ln):
+            tinfo, j = _parse_task_block(lines, i)
+            if tinfo and tinfo["task_id"]:
+                tasks[tinfo["task_id"]] = {
+                    "env": tinfo["env"],
+                    "act": tinfo["act"],
+                    "description": tinfo["description"],
+                    "step_ids": tinfo["step_ids"],
+                }
+                task_order.append(tinfo["task_id"])
+            i = j; continue
+        i += 1
+
+    # step → task 매핑
+    owner = {}
+    for tid, tinfo in tasks.items():
+        for sid in tinfo.get("step_ids", []):
+            owner[sid] = tid
+    for s in steps:
+        s["task_id"] = owner.get(s["id"])
+
+    return {"steps": steps, "tasks": tasks, "task_order": task_order}
+
+# 2) 간단 포매터: breakdown(Task#...)과 numbered steps를 합쳐
+#    "MAIN PLAN + Task 섹션" 문자열을 생성 (LLM 실패 시 균등분할 fallback)
+def _simple_assign_steps_to_tasks(breakdown_text: str, final_steps_text: str) -> str:
+    task_lines = [ln.strip() for ln in (breakdown_text or "").splitlines() if ln.strip().startswith("Task#")]
+    step_lines = []
+    step_pattern = re.compile(r'^\s*(\d+)\.\s*([01]#.*)')
+    for ln in (final_steps_text or "").splitlines():
+        m = step_pattern.match(ln.strip())
+        if m: step_lines.append(ln.strip())
+
+    if not task_lines or not step_lines:
+        return "MAIN PLAN\n" + "\n".join(step_lines)
+
+    total_steps = len(step_lines)
+    num_tasks = len(task_lines)
+    steps_per_task = max(1, total_steps // max(1, num_tasks))
+
+    out = ["=== 최종 자동화 계획 ===", "MAIN PLAN"]
+    out.extend(step_lines)
+    out.append(""); out.append("MAIN PLAN")
+
+    cur = 0
+    for i, tline in enumerate(task_lines):
+        m = re.match(r'(Task#\d+):\s*(ENV\[.*?\])\s*(ACT\[.*?\])', tline)
+        if not m:
+            # 헤더 포맷이 깨져도 최대한 출력
+            out.append(tline)
+        else:
+            out.append(f"{m.group(1)}: {m.group(2)} {m.group(3)}")
+
+        # Description 붙이기 (다음 Task# 전까지 첫 Description:)
+        desc = None
+        tpos = (breakdown_text or "").find(tline)
+        if tpos != -1:
+            remain = (breakdown_text or "")[tpos + len(tline):]
+            for ln in remain.splitlines():
+                ln = ln.strip()
+                if ln.startswith("Description:"):
+                    desc = ln; break
+                if ln.startswith("Task#"):
+                    break
+        if desc: out.append(desc)
+
+        # 균등 할당
+        if i == num_tasks - 1:
+            tsteps = step_lines[cur:]
+        else:
+            end = min(cur + steps_per_task, total_steps)
+            tsteps = step_lines[cur:end]
+            cur = end
+        out.extend(tsteps)
+        if i < num_tasks - 1:
+            out.append("")
+    return "\n".join(out)
+
+def _format_with_tasks(breakdown_text: str, steps_text: str) -> str:
+    """가능하면 LLM으로 의미기반 할당 → 실패 시 simple fallback"""
+    try:
+        # (선택) LLM으로 정교한 매칭 시도 — 실패 시 아래 fallback
+        from openai import OpenAI
+        _c = OpenAI()
+        prompt = f"""You are a task-step matching assistant. Assign each numbered step to the best Task.
+
+TASK BREAKDOWN:
+{breakdown_text.strip()}
+
+PLAN STEPS:
+{steps_text.strip()}
+
+OUTPUT FORMAT (exactly):
+=== 최종 자동화 계획 ===
+MAIN PLAN
+{steps_text.strip()}
+
+MAIN PLAN
+Task#1: ENV[...] ACT[...]
+Description: ...
+[list the specific step numbers that belong to this task]
+
+Task#2: ENV[...] ACT[...]
+Description: ...
+[list the specific step numbers that belong to this task]
+
+... (continue for all tasks)"""
+        msg = [
+            {"role":"system","content":"You are precise. Follow the format exactly."},
+            {"role":"user","content":prompt}
+        ]
+        # 구 버전은 call_chat이 없을 수 있어 직접 호출
+        r = _c.chat.completions.create(model="gpt-4o-mini", messages=msg, temperature=0.0, max_tokens=2000)
+        txt = r.choices[0].message.content
+        if txt and "=== 최종 자동화 계획 ===" in txt and "MAIN PLAN" in txt:
+            return txt
+    except Exception:
+        pass
+    return _simple_assign_steps_to_tasks(breakdown_text, steps_text)
+
+# 3) 공개 API: 구 버전 파이프라인 결과로 PlanBundle을 반환
+def globalPlanner_bundle(command: str, content: str) -> Dict[str, Any]:
+    """
+    (구 버전용) 기존 globalPlanner 파이프라인을 그대로 활용하여
+    - numbered steps를 생성
+    - breakdown(content)와 결합해 'MAIN PLAN + Task 섹션' 문자열 생성
+    - PlanBundle(dict)로 파싱해 반환
+    """
+    # 3-1) 기존 globalPlanner에서 하던 '예시 수집 → 플랜 생성'을 그대로 수행
+    #      (아래 로직은 GlobalPlanner_old.py의 globalPlanner(...)와 동일한 모델/프롬프트를 사용)
+    #      ※ 코드 중복을 피하려면, 원래 globalPlanner 내부의 "자동화 계획 생성" 부분을
+    #        별도 함수로 빼서 여기서도 재사용해도 됩니다.
     vector_db = create_vector_db()
-    
-    # 유사한 작업 검색
-    print("유사한 작업을 검색합니다...")
     query_text = extract_task_unit_headers(content)
-    
     similar_tasks = search_diverse_similar_tasks(query_text, vector_db, top_k=9)
-    print(f"{len(similar_tasks)}개의 유사한 작업을 찾았습니다.")
-
     examples_list = top_similar_tasks_per_current(content, similar_tasks, top_n=2)
     examples_text = "\n\n".join(examples_list)
-    print(f"{CYAN}Examples to show to the prompt: {examples_text}{RESET}")
-    
-    # 자동화 계획 생성
-    print("자동화 계획을 생성합니다...")
+
+    # numbered steps 생성(원래 globalPlanner와 동일 프롬프트)
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
@@ -432,25 +653,35 @@ def globalPlanner(command, content):
             {"role": "user", "content": f"Here are some related past Task for inspiration (these are just examples, not exact solutions):\n{examples_text}"},
             {"role": "user", "content": f"Task: {command}"}
         ],
-        max_tokens=4000,
+        max_tokens=10000,
         temperature=0.4
     )
     print(f"Given command: {command}")
-    output = response.choices[0].message.content            
-    #output2 = "1. 0#open, chrome\n2. 0#go to, https://chatgpt.com. 0#click, Upload files and more(Button)\n4. 0#click, Upload from computer(MenuItem)\n5. 0#switch focus, File explorer\n6. 0#click, a paper about Multihead Attention(ListItem)\n7. 0#press, enter\n8. 0#text input, 'Give me a summary of this paper.' \n9. 0#wait, for the answer"
-    print(f"{MAGENTA}Task Splitted: {output}{RESET}") 
-    output = tokenizer(output)
-    print(output)
-    return output    ## 굳이 모듈로 만들어 사용할 필요?
+    plan_text = response.choices[0].message.content or ""
+    # 3-2) numbered lines만 추출
+    step_lines = []
+    pat_line = re.compile(r'^\s*\d+\.\s*[01]#')
+    for ln in plan_text.splitlines():
+        if pat_line.match(ln.strip()):
+            step_lines.append(ln.strip())
+    steps_only_text = "\n".join(step_lines)
 
-def tokenizer(output):
-    parsed_list = []
-    for line in output.split("\n"):
-        # 정규식으로 task 패턴 파싱
-        match = re.match(r"(\d+)\.\s*(\d+)#([^,]+),\s*(.+)", line)
-        if match:
-            assist_bit, action, obj = match.group(2).strip(), match.group(3).strip(), match.group(4).strip()
-            parsed_list.append([assist_bit, action, obj])
-        else:
-            print(f"Warning: Unrecognized task format - {line}")
-    return parsed_list
+    # 3-3) breakdown(content)와 결합하여 'MAIN PLAN + Task 섹션' 문자열 생성
+    formatted_output = _format_with_tasks(content, steps_only_text)
+
+    # 3-4) PlanBundle로 파싱하여 반환
+    return _parse_formatted_to_planbundle(formatted_output)
+
+# 4) (선택) 레거시 호환: PlanBundle → 예전 step 리스트
+def globalPlanner_steps(command: str, content: str) -> List[List[str]]:
+    """
+    예전 UI_Control(task_list)과의 호환용.
+    PlanBundle의 steps를 [assist,event,object] 형태의 리스트로 변환.
+    """
+    bundle = globalPlanner_bundle(command, content)
+    steps = []
+    for s in bundle.get("steps", []):
+        steps.append([str(s.get("assist", 0)), s.get("event",""), s.get("object","")])
+    return steps
+
+# =====================[ /PATCH ]=====================

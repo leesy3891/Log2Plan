@@ -14,7 +14,7 @@ def parse_local_plan(input_string):
     match = re.search(r'localPlan:(.*)', input_string)
     if not match:
         return None, None, None
-    
+    3
     local_plan_str = match.group(1)
 
     # 1. 대괄호 안의 문자열 추출
