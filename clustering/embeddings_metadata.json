@@ -1,0 +1,13 @@
+{
+  "timestamp": "2025-09-10 02:27:58",
+  "total_task_units": 93,
+  "total_tasks": 316,
+  "embedding_model": "text-embedding-3-large",
+  "embedding_dimension": 3072,
+  "content_in_json": true,
+  "pkl_content_excluded": true,
+  "json_outputs": {
+    "task_units_fixed": "./steps_json\\task_units_fixed.jsonl",
+    "tasks_fixed": "./steps_json\\tasks_fixed.jsonl"
+  }
+}

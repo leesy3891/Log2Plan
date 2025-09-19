@@ -1,0 +1,10 @@
+{
+  "timestamp": "2025-09-06 18:17:24",
+  "model_path": "multiview_clustering_model.pkl",
+  "tu_shared_path": "shared_z_task_unit.npy",
+  "task_shared_path": "shared_z_task.npy",
+  "embedding_dim": 3072,
+  "latent_dim": 256,
+  "n_task_units": 93,
+  "n_tasks": 316
+}
